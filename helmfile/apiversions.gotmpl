@@ -1,0 +1,10 @@
+{{ if env "KUBE_API_VERSIONS" }}
+apiVersions:
+    {{- range $apiVersion := ( env "KUBE_API_VERSIONS" | split "," ) }}
+    - {{ $apiVersion }}
+    {{- end }}
+{{ else }}
+apiVersions:
+    - networking.k8s.io/v1
+    - networking.k8s.io/v1beta1
+{{ end }}

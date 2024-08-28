@@ -1,0 +1,33 @@
+apiVersion: v2
+dependencies:
+  - name: mxe-commons
+    repository: https://armdocker.rnd.ericsson.se/artifactory/proj-mxe-release-helm/
+    version: 2.3.0+176
+    condition: ml.base
+  - name: mxe-deployer
+    repository: https://armdocker.rnd.ericsson.se/artifactory/proj-mxe-release-helm/
+    version: 2.3.0+176
+    condition: ml.apps
+  - name: mxe-serving
+    repository: https://armdocker.rnd.ericsson.se/artifactory/proj-mxe-release-helm/
+    version: 2.3.0+176
+    condition: ml.apps
+  - name: mxe-training
+    repository: https://armdocker.rnd.ericsson.se/artifactory/proj-mxe-release-helm/
+    version: 2.3.0+176
+    condition: mxe-training.enabled
+  - name: mxe-exploration
+    repository: https://armdocker.rnd.ericsson.se/artifactory/proj-mxe-release-helm/
+    version: 2.3.0+176
+    condition: mxe-exploration.enabled
+  - name: mxe-workflow
+    repository: https://armdocker.rnd.ericsson.se/artifactory/proj-mxe-release-helm/
+    version: 2.3.0+176
+    condition: mxe-workflow.enabled
+description: Chart containing OSS Machine Learning Execution Environment microservices
+maintainers:
+  - email: PDLSMOKETE@pdl.internal.ericsson.com
+    name: Team Smoke
+name: eric-oss-ml-execution-env
+appVersion: 2.3.0-176
+version: 0.0.0-21

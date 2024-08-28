@@ -1,0 +1,4 @@
+Error: values don't meet the specifications of the schema(s) in the following chart(s):
+eric-oss-ml-execution-env:
+- global.registry: username is required
+- global.registry: password is required

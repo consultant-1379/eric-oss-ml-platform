@@ -1,0 +1,4 @@
+# If this is left empty no values will be set to false in any of the charts
+optionality:
+  eric-oss-ml-execution-env-base:
+  eric-oss-ml-execution-env-apps:

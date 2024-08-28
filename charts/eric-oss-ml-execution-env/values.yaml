@@ -1,0 +1,719 @@
+#
+# COPYRIGHT Ericsson 2021
+#
+#
+#
+# The copyright to the computer program(s) herein is the property of
+#
+# Ericsson Inc. The programs may be used and/or copied only with written
+#
+# permission from Ericsson Inc. or in accordance with the terms and
+#
+# conditions stipulated in the agreement/contract under which the
+#
+# program(s) have been supplied.
+#
+
+### eric-oss-ml-execution-env Helm chart defaults:
+ml:
+  # base and apps keys are set for the two-phase deployment of this umbrella chart
+  base: false
+  apps: false
+  config:
+    # Choose whether RateLimit needs to be applied for the Model Service
+    rateLimit: &rateLimitEnabled false
+    deploymentManager: false
+  iam:
+    username: "mxe-user"
+    password: "password"
+    temporal: &temporalUser true
+    kcadminid: "admin"
+    kcpasswd: "my-super-secret-pw"
+  gitops:
+    # GitOps repo details:
+    # All manifests to be deployed are to be checked in here. Either by the user or by the Deployer service.
+    # If internalGitEnabled=true, Deployer init creates a repo at <*giteaRootUrl/*internalGitOrgName/*internalGitRepoName>.git
+    # and configures in ArgoCD
+    internal: &internalGitEnabled true
+    # Git repo URL (MXE charts cannot be templated here)
+    repoUrl: &gitOpsRepoUrl https://gitea.mxe.cluster-fqdn/eiap/mxe-gitops.git
+    # Branch is not created automatically, only existing branches can be used or it has to be created
+    # manually in the GitOps repository before using mxe-model-service.
+    branch: &deployerGitRepoBranch master
+    credentials:
+      username: ""
+      password: ""
+      email: ""
+    commit:
+      # Git Commit Author Information
+      # should be set with the same values used in MXE Deployer
+      authorName:  &commitAuthorName "MXE Deployer"
+      authorEmail: &commitAuthorEmail "mxe-deployer@local.domain"
+      # Gitserver domain for which the above commit author information is to be used.
+      # This property is ignored if internal git is enabled. Instead the value of *giteaIngressHost is used as the commitDomain.
+      # Set this to the domain of your gitserver if you are using an external git provider like gerrit or gitlab.
+      # For example: gerrit.ericsson.se or gitlab.internal.ericsson.com
+      authorDomain: &commitAuthorDomain
+  helm:
+    # Deployer is not used for installing Helm charts
+    url: &helmRepo "dummy"
+    username: ""
+    password: ""
+  hosts:
+    # The domain name by which MXE's api and gui will be accessible
+    apiHostname: &apiHostname mxe.cluster-fqdn
+    # The port on which MXE will be accessible.
+    apiPort: &apiPort 443
+    # The domain name to access MXE's Keycloak
+    oauthApiHostname: &oauthApiHostname oauth.mxe.cluster-fqdn
+    # Set the Argo CD http hostname if ingress is enabled
+    argocdHostName: &argocdHttpHostName argocd.mxe.cluster-fqdn
+    # Set the deployer service hostname
+    deployerServiceHostName: &deployerServiceHostName deployer.mxe.cluster-fqdn
+    # Gitea Ingress Host
+    giteaIngressHost: &giteaIngressHost gitea.mxe.cluster-fqdn
+    # Gitea Root URL
+    giteaRootUrl: &giteaRootUrl https://gitea.mxe.cluster-fqdn
+    # Gitea OAuth Cofiguration - openid-configuration endpoint of Keycloak
+    giteaOauthAutoDiscoverUrl: &giteaOauthAutoDiscoverUrl https://oauth.mxe.cluster-fqdn/auth/realms/mxe/.well-known/openid-configuration
+  servicecreds:
+    # Random strings to be used as secrets in mxe
+    # These are generated once before installation and set in the values file
+    # This ensures that secrets do not ever change and remain idempotent
+    # To generate these random strings execute dev/generate-random-secrets.sh
+    minioAdminAccessKey: &minioAdminAccessKey ""
+    minioAdminSecretKey: &minioAdminSecretKey ""
+    pgCustomPassword: &mxePgCustomPassword ""
+    catalogueServiceInstanceMinioSecretkey: &catalogInstanceSecretKey ""
+    catalogueServiceMinioSecretkey: &catalogServiceSecretKey ""
+    trainingjrInstanceMinioSecretkey: &trainingjrInstanceSecretKey ""
+    trainingjrServiceMinioSecretkey: &trainingjrServiceSecretKey ""
+    trainingpkgInstanceMinioSecretkey: &trainingpkgInstanceSecretKey ""
+    trainingpkgServiceMinioSecretkey: &trainingpkgServiceSecretKey ""
+    catalogueServicePgCustomUserPwd: &catalogServicePgCustomUserPwd ""
+    trainingServicePgCustomUserPwd: &trainingServicePgCustomUserPwd ""
+    authorServicePgCustomUserPwd: &authorServicePgCustomUserPwd ""
+    lcmContainerRegistryPassword: &lcmContainerRegistryPassword ""
+    argocdAdminPwd: ""
+
+# Helm release namespace:
+namespace: &namespace eric-ml-ns
+
+# Whether OWASP should be enabled for endpoints.
+owasp: &owasp true
+# Whether OWASP should be enabled for model-endpoints. This degrades performance noticeably when it's enabled! Takes effect only if owasp is set to true
+modelServiceOwasp: &modelServiceOwasp false
+
+# Size of the container registry volume which is used to store onboarded model and training package images.
+containerRegistryVolumeSize: &containerRegistryVolumeSize 20Gi
+
+# Choose the service mesh to be used internal/external
+enableInternalServiceMesh: &enableInternalServiceMesh true
+
+# Legal Warning message to be displayed on the login page of the GUI and after login on the CLI
+legalWarningMessage: &legalWarningMessage |-
+  *Log-on is only allowed for authorized users. If you are not an authorized user, please exit.
+  In accordance with requirements of data protection laws, we hereby inform you that personally identifiable information will be handled in log files for legal, security and costs reasons.
+  This system processes sensitive personal data. The misuse of such data may generate considerable harm to the data subjects. Be reminded of the confidentiality obligations you have when accessing this kind of data and the disciplinary consequences of improper handling.
+
+
+### DO NOT MODIFY PARAMETERS BELOW THIS LINE! ###
+
+# Internal install can access armdocker, external install would use generated CSARs.
+installerSeldonDockerRegistry: &installerSeldonDockerRegistry armdocker.rnd.ericsson.se/proj-mxe
+installerAmbassadorDockerRegistry: &installerAmbassadorDockerRegistry armdocker.rnd.ericsson.se/proj-mxe/datawire/ambassador
+installerArgoCDDockerRegistry: &installerArgoCDDockerRegistry armdocker.rnd.ericsson.se/proj-mxe/argoproj/argocd
+installerHAProxyDockerRegistry: &installerHAProxyDockerRegistry armdocker.rnd.ericsson.se/proj-mxe/haproxy
+installerRedisDockerRegistry: &installerRedisDockerRegistry armdocker.rnd.ericsson.se/proj-mxe/redis
+installerGiteaDockerRegistry: &installerGiteaDockerRegistry armdocker.rnd.ericsson.se/proj-mxe/gitea/mxe-gitea
+
+# MXE commons helm release name
+mxe-commons-release-name: &mxe-commons-release-name eric-oss-ml-execution-env-base
+# MXE serving argocd-application name
+mxe-serving-release-name: &mxe-serving-release-name eric-oss-ml-execution-env-apps
+
+# Whether MXE will be accessible through a default ingress controller already present on the Kubernetes cluster, or a new internal one which will be installed by MXE.
+disableDefaultIngressControllerUse: &disableDefaultIngressControllerUse false
+
+# Requires SIP-TLS ADP generic service
+enableSipTls: &enableSipTls false
+# Whether to enable mTLS between MXE services using Istio service mesh
+# If this field is set to "true", the label "istio-injection: enabled" MUST be attached to the mxe namespace before installation
+# If this field is set to "false", the label "istio-injection" MUST be removed from the mxe namespace before installation
+enableIstioMtls: &enableIstioMtls false
+
+# Secrets containing the credentials to connect to various services.
+# If internal Git repo is requested, then user is created in Gitea with the credentials specified in gitOpsAccessSecret.
+# For internal Git repo, email is mandatory along with username and password (name=admin is restricted).
+gitOpsAccessSecret: &gitOpsAccessSecret mxe-gitops-creds
+argocdAdminCreds: &argocdAdminCreds argocd-admin-creds
+mxeAdminSecret: &mxeAdminSecret iam-creds-admin
+mxeUserSecret: &mxeUserSecret iam-creds-realm-mxe
+dockerRegistrySecret: &installerDockerRegistrySecret mxe-docker-creds
+#   1. curl http://pki.ericsson.se/CertData/EGADRootCA.crt  > EGADRootCA.crt
+#   2. curl http://pki.ericsson.se/CertData/EGADIssuingCA3.crt >> EGADRootCA.crt
+#   3. kubectl create secret generic iam-ca-secret --from-file=ca.crt=./EGADRootCA.crt --namespace mxe
+# The name of a secret which contains a ca certs for the given iam hostname
+iamCaSecretName: &iamCaSecretName iam-ca-certs
+
+# BRO service is used in MXE for backup and restore operations. Currently it is supported only for the following ADP services:
+# eric-data-document-database-pg, eric-data-object-storage-mn, eric-lcm-container-registry
+broAgentEnable: &broAgentEnable false
+# BRO Service Name, for example: eric-ctrl-bro.bro.svc.cluster.local
+broServiceName: &broServiceName eric-ctrl-bro.mxe-ci.svc.cluster.local
+# Port where BRO Service is exposed, default is 3000
+broGrpcServicePort: &broGrpcServicePort 3000
+# The value of brLabelKey parameter configured while installing the BRO Service
+brLabelKey: &brLabelKey adpbrlabelkey
+
+tomcatConnectionTimeoutInterval: &tomcatConnectionTimeoutInterval 60s
+
+global:
+  networkPolicy:
+    enabled: &networkPolicy false
+  support:
+    ipv6:
+      enabled: false
+  timezone: UTC
+  # To secure MXE's API endpoint, a certificate must be stored in a secret. This secret must be in the mxe namespace.
+  # The name of the secret can be given with the next key.
+  mxeApiTlsSecretName: mxe-tls
+  # To secure MXE's oauth endpoint, a certificate must be stored in a secret. This secret must be in the mxe namespace.
+  # The name of the secret can be given with the next key.
+  mxeOauthApiTlsSecretName: oauth-tls
+  mxeOauthApiHostname: *oauthApiHostname
+  # This ca secret for oauth api host
+  mxeIamCaSecretName: *iamCaSecretName
+  mxeApiHostname: *apiHostname
+  mxeApiport: *apiPort
+  # By default, MXE uses a default ingress controller.
+  # To use an internal one change the next setting to false. The behaviour of this ingress controller can be modified under mxe-ingress-controller key.
+  mxeDisableDefaultIngressControllerUse: *disableDefaultIngressControllerUse
+  # Istio - Configure type of service account tokens - values [ "third-party-jwt" , "first-party-jwt" ]
+  # Refer: https://istio.io/latest/docs/ops/best-practices/security/#configure-third-party-service-account-tokens
+  jwtPolicy: first-party-jwt
+  pullSecret: *installerDockerRegistrySecret
+  registry:
+    url: &installerDockerRegistry armdocker.rnd.ericsson.se
+    pullSecret: *installerDockerRegistrySecret
+    username: "username"
+    password: "password"
+  imageRegistry: *installerDockerRegistry
+  security:
+    tls:
+      enabled: *enableSipTls
+  mtls:
+    auto: *enableIstioMtls
+  multiTenancy:
+    # Service Mesh Component - Set this value to "true" to allow Istio to run in "mxe" namespace.
+    # Setting this value to "false" prevents Istio from running in a namespace different from "istio-system".
+    enabled: true
+  meshConfig:
+    accessLogFile: /dev/stdout
+    enableAutoMtls: *enableIstioMtls
+  # IngressClass Name of Cluster-Wide Ingress Controller (on KaaS it is nginx)
+  ingressClass: &clusterWideIngressClassName null
+  internalRegistry:
+    password: *lcmContainerRegistryPassword
+  # If the target environment where MXE is going to be installed is AWS EKS, set the below property to true
+  # Setting this property to true enables hostNetwork and hostPort in service mesh and seldon-core-operator
+  # enabling Pods in EKS to reach Webhooks which are part of the control plane
+  isEKS: false
+
+mxe-commons:
+  config:
+    object_storage_admin:
+      accesskey: *minioAdminAccessKey
+      secretkey: *minioAdminSecretKey
+    pg:
+      custom:
+        password: *mxePgCustomPassword
+    ratelimit:
+      enabled: *rateLimitEnabled
+  eric-mesh-controller:
+    enabled: *enableInternalServiceMesh
+
+  eric-mxe-gatekeeper:
+    label:
+      eric-data-document-database-pg-access: "true"
+    # Whether to install gatekeeper with High Availability:
+    # true (default) - 3 instances of gatekeeper is deployed, requires 3 nodes.
+    # false - 1 instance of gatekeeper is deployed.
+    highAvailability: true
+    ingress:
+      clusterWideIngressClass: *clusterWideIngressClassName
+    service:
+      # The port where gatekeeper, MXE's main endpoint will be exposed
+      httpsPort: *apiPort
+    keycloak:
+      realm:
+        master:
+          secret:
+            secretName: *mxeAdminSecret
+        mxe:
+          secret:
+            secretName: *mxeUserSecret
+            temporalUser: *temporalUser
+    istioMtls:
+      enabled: *enableIstioMtls
+
+  eric-sec-access-mgmt:
+    label:
+      eric-data-document-database-pg-access: "true"
+    statefulset:
+      adminSecret: *mxeAdminSecret
+    persistence:
+      tls:
+        enabled: *enableSipTls
+    service:
+      tls:
+        enabled: *enableSipTls
+    tls:
+      client:
+        ldap:
+          enabled: *enableSipTls
+        pg:
+          enabled: *enableSipTls
+      clientCA:
+        enabled: *enableSipTls
+    istioMtls:
+      enabled: *enableIstioMtls
+    http:
+      hostValidation:
+        allowedHosts: *oauthApiHostname
+
+  keycloak:
+    ingress:
+      clusterWideIngressClass: *clusterWideIngressClassName
+
+  internal-container-registry:
+    ingress:
+      tls:
+        # For ingress, https is forced by default. This means that the registry will work as a secure registry.
+        # For insecure registry, the next line should be uncommented.
+        enabled: *disableDefaultIngressControllerUse
+        # The certificate for https must be stored in a kubernetes tls secret.
+        # In the next line, the name of the secret must be given, if tls is enabled.
+        secretName: mxe-tls
+
+  eric-mxe-ambassador-ingress:
+    ingress:
+      owasp:
+        enabled: *owasp
+      modelServiceOwasp:
+        enabled: *modelServiceOwasp
+    istioMtls:
+      enabled: false
+
+  eric-pm-server:
+    istioMtls:
+      enabled: false
+
+  eric-mxe-prometheus:
+    ingress:
+      owasp:
+        enabled: *owasp
+    rbac:
+      clusterWide: true
+
+  mxe-gui:
+    imageCredentials:
+      registry:
+        url: *installerDockerRegistry
+    ingress:
+      owasp:
+        enabled: *owasp
+    legalWarningMessage: *legalWarningMessage
+    istioMtls:
+      enabled: *enableIstioMtls
+
+  eric-mxe-upgrade-jobs:
+    imageCredentials:
+      repoPath: "proj-mxe-release"
+    preupgrade-cleanup:
+      keycloakAdminSecretNameOverride: *mxeAdminSecret
+    istioMtls:
+      enabled: false
+
+  eric-data-coordinator-zk:
+    # Required for NiFi clustering in mxe-workflow
+    enabled: false
+    istioMtls:
+      enabled: false
+
+  eric-mxe-pypiserver:
+    enabled: false
+
+  ambassador:
+    image:
+      ossRepository: *installerAmbassadorDockerRegistry
+    imagePullSecrets:
+      - name: *installerDockerRegistrySecret
+    istioMtls:
+      enabled: false
+
+  # Documentation of Document Database PG's options: http://calstore.internal.ericsson.com/elex?LI=EN/LZN7020476/2R*&FN=1_1531-CAV10116_2Uen.*.html&HT=id_sjxl
+  eric-data-document-database-pg:
+    global:
+      adpBR:
+        broServiceName: *broServiceName
+        broGrpcServicePort: *broGrpcServicePort
+        brLabelKey: *brLabelKey
+    networkPolicy:
+      enabled: *networkPolicy
+      matchLabels: []
+    security:
+      postgres:
+        tls:
+          enable: *enableSipTls
+    istioMtls:
+      enabled: *enableIstioMtls
+    brAgent:
+      enabled: *broAgentEnable
+
+  # Documentation of Docker registry's options: http://calstore.internal.ericsson.com/elex?LI=EN/LZN7020497/1R*&FN=1_1531-CAV10168_1Uen.*.html&HT=id_775u
+  eric-lcm-container-registry:
+    global:
+      adpBR:
+        broServiceName: *broServiceName
+        broGrpcServicePort: *broGrpcServicePort
+        brLabelKey: *brLabelKey
+    persistence:
+      persistentVolumeClaim:
+        # The size of the persistent volume which is used to store onboarded model and training package images.
+        # Depending on the storage class type the volume may not be resized after install.
+        size: *containerRegistryVolumeSize
+    istioMtls:
+      enabled: false
+    brAgent:
+      enabled: *broAgentEnable
+
+  # Documentation of Object Storage http://calstore.internal.ericsson.com/elex?LI=EN/LZN7830042*&FN=1_1531-APR20147_1Uen.*.html
+  eric-data-object-storage-mn:
+    global:
+      serviceNames:
+        ctrl:
+          bro: *broServiceName
+      servicePorts:
+        ctrl:
+          bro: *broGrpcServicePort
+    tls:
+      enabled: *enableSipTls
+    autoEncryption:
+      enabled: *enableSipTls
+    istioMtls:
+      enabled: *enableIstioMtls
+    brAgent:
+      enabled: *broAgentEnable
+      brLabelKey: *brLabelKey
+
+  mxe-author-service:
+    imageCredentials:
+      registry:
+        url: *installerDockerRegistry
+    istioMtls:
+      enabled: *enableIstioMtls
+    database:
+      customUserPwd: *authorServicePgCustomUserPwd
+
+  mxe-default-backend:
+    istioMtls:
+      enabled: *enableIstioMtls
+
+  mxe-ingress-controller:
+    imageCredentials:
+      registry:
+        url: *installerDockerRegistry
+    istioMtls:
+      enabled: *enableIstioMtls
+
+  mxe:
+    istioMtls:
+      enabled: *enableIstioMtls
+
+mxe-deployer:
+  global:
+    mxeCommonsReleaseName: *mxe-commons-release-name
+  internalGitopsRepoEnabled: *internalGitEnabled
+  argo-cd:
+    global:
+      image:
+        repository: *installerArgoCDDockerRegistry
+    controller:
+      resources:
+        limits:
+          cpu: 2000m
+          memory: 2048Mi
+        requests:
+          cpu: 400m
+          memory: 512Mi
+    redis:
+      enabled: false
+    # This key configures Redis-HA subchart and when enabled (redis-ha.enabled=true)
+    # the custom redis deployment is omitted
+    redis-ha:
+      enabled: true
+      image:
+        repository: *installerRedisDockerRegistry
+      redis:
+        resources:
+          requests:
+            memory: 200Mi
+            cpu: 100m
+          limits:
+            memory: 800Mi
+            cpu: 400m
+      haproxy:
+        image:
+          repository: *installerHAProxyDockerRegistry
+        resources:
+          requests:
+            memory: 200Mi
+            cpu: 100m
+          limits:
+            memory: 400Mi
+            cpu: 200m
+    server:
+      resources:
+        limits:
+          cpu: 200m
+          memory: 1024Mi
+        requests:
+          cpu: 50m
+          memory: 128Mi
+      ingress:
+        enabled: true
+        hosts:
+          - *argocdHttpHostName
+        tls:
+          - secretName: argocd-tls
+            hosts:
+              - *argocdHttpHostName
+    repoServer:
+      resources:
+        limits:
+          cpu: 2000m
+          memory: 2048Mi
+        requests:
+          cpu: 400m
+          memory: 512Mi
+    # use bcrypted password see https://argoproj.github.io/argo-cd/faq/#i-forgot-the-admin-password-how-do-i-reset-it
+    configs:
+      secret:
+        argocdServerAdminPassword:
+        createSecret: false
+
+  mxe-deployer-service:
+    ingress:
+      clusterWideIngressClass: *clusterWideIngressClassName
+      enabled: true
+      hostName: *deployerServiceHostName
+      tlsSecretName: deployer-tls
+    resources:
+      limits:
+        cpu: 500m
+        memory: 640Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    config:
+      helm:
+        repository: *helmRepo
+      git:
+        url: *gitOpsRepoUrl
+        accessSecret: *gitOpsAccessSecret
+        internal:
+          enabled: *internalGitEnabled
+          rootUrl: *giteaRootUrl
+          org: eiap
+          repo: mxe-gitops
+          domain: *giteaIngressHost
+          userEmail: *commitAuthorEmail
+        author:
+          name: *commitAuthorName
+          email: *commitAuthorEmail
+          domain: *commitAuthorDomain
+      argocd:
+        ingress:
+          clusterWideIngressClass: *clusterWideIngressClassName
+        ui:
+          ingress:
+            enabled: true
+            host: *argocdHttpHostName
+            tlsSecretName: argocd-tls
+      sso:
+        mxe:
+          ingress:
+            apiHostName: *apiHostname
+            apiPort: *apiPort
+            oauthApiHostName: *oauthApiHostname
+          adminSecret: *mxeAdminSecret
+        users:
+          adminUserSecret: *argocdAdminCreds
+
+  mxeGitea:
+    ingress:
+      clusterWideIngressClass: *clusterWideIngressClassName
+    giteaKeycloakInit:
+      clientRedirectUri: *giteaRootUrl
+      autoDiscoveryUrl: *giteaOauthAutoDiscoverUrl
+      mxeKeycloakAdminSecretName: *mxeAdminSecret
+    giteaIngressHost: *giteaIngressHost
+    giteaApiTls: gitea-tls
+    giteaRootUrl: *giteaRootUrl
+    # mxe-user is created in Gitea with given email address
+    mxeUserSecretName: *mxeUserSecret
+    mxeUserEmail: "mxe-user@local.domain"
+    keepAliveRepo:
+      org: eiap
+    ingressController:
+      hostOverride:
+
+  gitea:
+    image:
+      repository: *installerGiteaDockerRegistry
+    gitea:
+      config:
+        server:
+          ROOT_URL: *giteaRootUrl
+      livenessProbe:
+        httpGet:
+          path: /eiap/keep-alive
+    ingress:
+      hosts:
+        - host: *giteaIngressHost
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: gitea-tls
+          hosts:
+            - *giteaIngressHost
+    memcached:
+      image:
+        pullSecrets:
+          - *installerDockerRegistrySecret
+
+mxe-serving:
+  mxe-model-service:
+    replicaCount: 1
+    dockerRegistry:
+      # The host name of the internal Docker registry. This will be used by the used Kubernetes cluster to start stored models
+      externalHostname: *apiHostname
+      # The port of the internal Docker registry. If the default ingress controller is disabled, then this will be the same as the internal ingress controller's port
+      externalPort: *apiPort
+    ingress:
+      owasp:
+        enabled: *owasp
+    istioMtls:
+      enabled: *enableIstioMtls
+    deployerService:
+      # Used for deployer-service host name:
+      namespace: *namespace
+      argocdAdminCreds : *argocdAdminCreds
+      gitRepo:
+        url: *gitOpsRepoUrl
+        path: model-services/seldon-deployments/
+        branch: *deployerGitRepoBranch
+    tomcat:
+      connectionTimeout: *tomcatConnectionTimeoutInterval
+
+  mxe-model-catalogue-service:
+    mxeCommonsReleaseName: *mxe-commons-release-name
+    images:
+      packager:
+        pullPolicy: Always
+        registry: *installerSeldonDockerRegistry
+      modelBase:
+        # The docker repository where model's base image is stored
+        registry: *installerSeldonDockerRegistry
+    dockerRegistry:
+      # The host name of the internal Docker registry. This will be used by the used Kubernetes cluster to start stored model images
+      externalHostname: *apiHostname
+      # The port of the internal Docker registry. If the default ingress controller is disabled, then this will be the same as the internal ingress controller's port
+      externalPort: *apiPort
+    ingress:
+      owasp:
+        enabled: *owasp
+    istioMtls:
+      enabled: *enableIstioMtls
+    minio:
+      modelsource:
+        instance:
+          secretkey: *catalogInstanceSecretKey
+        service:
+          secretkey: *catalogServiceSecretKey
+    database:
+      customUserPwd: *catalogServicePgCustomUserPwd
+
+  # Documentation of Seldon core's options: https://github.com/SeldonIO/seldon-core/blob/v1.0.1/helm-charts/seldon-core-operator/values.yaml
+  seldon-core-operator:
+    enabled: true
+    image:
+      registry: *installerSeldonDockerRegistry
+    executor:
+      image:
+        registry: *installerSeldonDockerRegistry
+    istioMtls:
+      enabled: false
+
+  eric-mxe-serving-upgrade-jobs:
+    preupgrade-cleanup:
+      keycloakAdminSecretNameOverride: *mxeAdminSecret
+    istioMtls:
+      enabled: false
+    seldondeployment-updater:
+      gitOpsRepo:
+        credentialSecret: *gitOpsAccessSecret
+        url: *gitOpsRepoUrl
+        branch: *deployerGitRepoBranch
+        modelsDir: model-services/seldon-deployments/
+      extraEnv:
+        - name: GIT_TRACE
+          value: "true"
+        - name: GIT_CURL_VERBOSE
+          value: "true"
+        - name: GIT_COMMITTER_NAME
+          value: *commitAuthorName
+        - name: GIT_COMMITTER_EMAIL
+          value: *commitAuthorEmail
+
+mxe-training:
+  enabled: false
+  mxe-model-training-service:
+    images:
+      packager:
+        registry: *installerSeldonDockerRegistry
+        pullPolicy: Always
+      modelBase:
+        # The docker repository where model's base image is stored
+        registry: *installerSeldonDockerRegistry
+    dockerRegistry:
+      # The host name of the internal Docker registry. This will be used by the used Kubernetes cluster to start stored training jobs
+      externalHostname: *apiHostname
+      # The port of the internal Docker registry. If the default ingress controller is disabled, then this will be the same as the internal ingress controller's port
+      externalPort: *apiPort
+    ingress:
+      owasp:
+        enabled: *owasp
+    istioMtls:
+      enabled: *enableIstioMtls
+    minio:
+      trainingjr:
+        instance:
+          secretkey: *trainingjrInstanceSecretKey
+        service:
+          secretkey: *trainingjrServiceSecretKey
+      trainingp:
+        instance:
+          secretkey: *trainingpkgInstanceSecretKey
+        service:
+          secretkey: *trainingpkgServiceSecretKey
+      database:
+        customUserPwd: *trainingServicePgCustomUserPwd
+
+mxe-exploration:
+  enabled: false
+
+mxe-workflow:
+  enabled: false

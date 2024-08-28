@@ -1,0 +1,7 @@
+apiVersion: v2
+description: Helmfile for ML Execution Environment
+maintainers:
+- email: PDLSMOKETE@pdl.internal.ericsson.com
+  name: Team Smoke
+name: eric-oss-ml-execution-env-helmfile
+version: 0.0.0-21

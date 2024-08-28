@@ -1,0 +1,259 @@
+#
+# COPYRIGHT Ericsson 2021
+#
+#
+#
+# The copyright to the computer program(s) herein is the property of
+#
+# Ericsson Inc. The programs may be used and/or copied only with written
+#
+# permission from Ericsson Inc. or in accordance with the terms and
+#
+# conditions stipulated in the agreement/contract under which the
+#
+# program(s) have been supplied.
+#
+
+### eric-oss-ml-execution-env Helm chart defaults:
+ml:
+  base: {{ eq .Release.Name "eric-oss-ml-execution-env-base" }}
+  apps: {{ eq .Release.Name "eric-oss-ml-execution-env-apps" }}
+  certs:
+    tls:
+      {{- range list "mxe" "deployer.mxe" "argocd.mxe" "gitea.mxe" "oauth.mxe"}}
+      - name: {{ . | trimSuffix ".mxe" }}
+        key: |-
+          {{- readFile ( printf "%s/%s.%s.key" ( $.Values | get "ml.certs.path" "../../certificates" ) . $.Values.global.hosts.ml ) | nindent 10 }}
+        crt: |-
+          {{- readFile ( printf "%s/%s.%s.crt" ( $.Values | get "ml.certs.path" "../../certificates" ) . $.Values.global.hosts.ml ) | nindent 10 }}
+      {{- end }}
+    ca:
+      crt: |-
+        {{- readFile ( printf "%s/EGADIssuingCA3.crt" ( $.Values | get "ml.certs.path" "../../certificates" ) ) | trimSuffix "\n" | nindent 8 }}
+        {{- readFile ( printf "%s/EGADRootCA.crt" ( $.Values | get "ml.certs.path" "../../certificates" ) ) | nindent 8 }}
+  config:
+    deploymentManager: {{ hasKey .Values.ml "config" | ternary (hasKey .Values.ml.config "deploymentManager" | ternary .Values.ml.config.deploymentManager false) false }}
+  gitops:
+    credentials:
+      username: {{ .Values.ml.gitops.credentials.username | default "mxe-gitops" }}
+      password: {{ .Values.ml.gitops.credentials.password | default "password" }}
+      email: {{ .Values.ml.gitops.credentials.email | default "mxe-gitops@local.domain" }}
+  servicecreds:
+    {{- .Values | get "ml.servicecreds" | toYaml | nindent 4 }}
+  hosts:
+    apiHostname: &apiHostname mxe.{{ .Values.global.hosts.ml }}
+    apiPort: &apiPort 443
+    oauthApiHostname: &oauthApiHostname oauth.mxe.{{ .Values.global.hosts.ml }}
+    argocdHostName: &argocdHttpHostName argocd.mxe.{{ .Values.global.hosts.ml }}
+    deployerServiceHostName: &deployerServiceHostName deployer.mxe.{{ .Values.global.hosts.ml }}
+    giteaIngressHost: &giteaIngressHost gitea.mxe.{{ .Values.global.hosts.ml }}
+    giteaRootUrl: &giteaRootUrl https://gitea.mxe.{{ .Values.global.hosts.ml }}
+    giteaOauthAutoDiscoverUrl: &giteaOauthAutoDiscoverUrl https://oauth.mxe.{{ .Values.global.hosts.ml }}/auth/realms/mxe/.well-known/openid-configuration
+
+global:
+  support:
+    ipv6:
+      enabled: {{ .Values | get "global.support.ipv6.enabled" }}
+  timezone: {{ .Values | get "global.timezone" }}
+  mxeOauthApiHostname: *oauthApiHostname
+  mxeApiHostname: *apiHostname
+  mxeApiport: *apiPort
+  pullSecret: &installerDockerRegistrySecret {{ .Values | get "global.registry.pullSecret" "mxe-docker-creds" }}
+  registry:
+    url: {{ .Values | get "global.registry.url" }}
+    username: {{ .Values | get "global.registry.username" }}
+    password: {{ .Values | get "global.registry.password" }}
+    pullSecret: *installerDockerRegistrySecret
+  imageRegistry: {{ .Values | get "global.registry.url" }}
+  ingressClass: &clusterWideIngressClassName {{ .Values | get "global.ingressClass" }}
+  internalRegistry:
+    password: {{ .Values | get "ml.servicecreds.lcmContainerRegistryPassword" }}
+
+mxe-commons:
+  config:
+    object_storage_admin:
+      accesskey: {{ .Values | get "ml.servicecreds.minioAdminAccessKey" }}
+      secretkey: {{ .Values | get "ml.servicecreds.minioAdminSecretKey" }}
+    pg:
+      custom:
+        password: {{ .Values | get "ml.servicecreds.pgCustomPassword" }}
+    ratelimit:
+      enabled: {{ .Values | get "ml.config.rateLimit" false }}
+  eric-mxe-gatekeeper:
+    ingress:
+      clusterWideIngressClass: *clusterWideIngressClassName
+    service:
+      httpsPort: *apiPort
+    keycloak:
+      realm:
+        master:
+          secret:
+            kcadminid: {{ .Values.ml.iam.kcadminid | default "admin" }}
+            kcpasswd: {{ .Values.ml.iam.kcpasswd | default "my-super-secret-pw" }}
+        mxe:
+          secret:
+            username: {{ .Values.ml.iam.username | default "mxe-user" }}
+            password: {{ .Values.ml.iam.password | default "password" }}
+            temporalUser: {{ hasKey .Values.ml.iam "temporal" | ternary .Values.ml.iam.temporal true }}
+  eric-sec-access-mgmt:
+    ingress:
+      hostname: *apiHostname
+      clusterWideIngressClass: *clusterWideIngressClassName
+    http:
+      hostValidation:
+        allowedHosts: *oauthApiHostname
+  keycloak:
+    ingress:
+      clusterWideIngressClass: *clusterWideIngressClassName
+  mxe-gui:
+    imageCredentials:
+      registry:
+        url: {{ .Values | get "global.registry.url" }}
+  ambassador:
+    imagePullSecrets:
+      - name: *installerDockerRegistrySecret
+  eric-lcm-container-registry:
+    ingress:
+      hostname: *apiHostname
+  metrics-server:
+    imagePullSecrets:
+      - *installerDockerRegistrySecret
+  mxe-author-service:
+    imageCredentials:
+      registry:
+        url: {{ .Values | get "global.registry.url" }}
+    database:
+      customUserPwd: {{ .Values | get "ml.servicecreds.authorServicePgCustomUserPwd" }}
+  mxe-ingress-controller:
+    imageCredentials:
+      registry:
+        url: {{ .Values | get "global.registry.url" }}
+
+mxe-deployer:
+  internalGitopsRepoEnabled: {{ .Values | get "ml.gitops.internal" true }}
+  argo-cd:
+    server:
+      ingress:
+        hosts:
+          - *argocdHttpHostName
+        tls:
+          - secretName: argocd-tls
+            hosts:
+              - *argocdHttpHostName
+  mxe-deployer-service:
+    ingress:
+      clusterWideIngressClass: *clusterWideIngressClassName
+      hostName: *deployerServiceHostName
+    config:
+      git:
+        url: &gitOpsRepoUrl {{ (hasKey .Values.ml.gitops "internal" | ternary .Values.ml.gitops.internal true) | ternary (printf "https://gitea.mxe.%s/eiap/mxe-gitops.git" .Values.global.hosts.ml) (.Values | get "ml.gitops.repoUrl") }}
+        internal:
+          enabled: {{ hasKey .Values.ml.gitops "internal" | ternary .Values.ml.gitops.internal true }}
+          rootUrl: *giteaRootUrl
+          domain: *giteaIngressHost
+          userEmail: &commitAuthorEmail {{ .Values.ml.gitops.commit.authorEmail | default "mxe-deployer@local.domain" }}
+        author:
+          name: &commitAuthorName {{ .Values.ml.gitops.commit.authorName | default "MXE Deployer" }}
+          email: *commitAuthorEmail
+          domain: {{ (hasKey .Values.ml.gitops "internal" | ternary .Values.ml.gitops.internal true) | ternary "" (sprigGet (urlParse .Values.ml.gitops.repoUrl) "host") }}
+      argocd:
+        ingress:
+          clusterWideIngressClass: *clusterWideIngressClassName
+        ui:
+          ingress:
+            host: *argocdHttpHostName
+      sso:
+        mxe:
+          ingress:
+            apiHostName: *apiHostname
+            apiPort: *apiPort
+            oauthApiHostName: *oauthApiHostname
+  mxeGitea:
+    ingress:
+      clusterWideIngressClass: *clusterWideIngressClassName
+    giteaKeycloakInit:
+      clientRedirectUri: *giteaRootUrl
+      autoDiscoveryUrl: *giteaOauthAutoDiscoverUrl
+    giteaIngressHost: *giteaIngressHost
+    giteaRootUrl: *giteaRootUrl
+    mxeUserEmail: "mxe-user@local.domain"
+  gitea:
+    gitea:
+      config:
+        server:
+          ROOT_URL: *giteaRootUrl
+    ingress:
+      hosts:
+        - host: *giteaIngressHost
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: gitea-tls
+          hosts:
+            - *giteaIngressHost
+    memcached:
+      image:
+        pullSecrets:
+          - *installerDockerRegistrySecret
+
+mxe-serving:
+  mxe-model-service:
+    dockerRegistry:
+      externalHostname: *apiHostname
+      externalPort: *apiPort
+    deployerService:
+      namespace: {{ .Release.Namespace }}
+      gitRepo:
+        url: *gitOpsRepoUrl
+        branch: &deployerGitRepoBranch {{ .Values.ml.gitops.branch | default "master" }}
+  mxe-model-catalogue-service:
+    dockerRegistry:
+      externalHostname: *apiHostname
+      externalPort: *apiPort
+    minio:
+      modelsource:
+        instance:
+          secretkey: {{ .Values | get "ml.servicecreds.catalogueServiceInstanceMinioSecretkey" }}
+        service:
+          secretkey: {{ .Values | get "ml.servicecreds.catalogueServiceMinioSecretkey" }}
+    database:
+      customUserPwd: {{ .Values | get "ml.servicecreds.catalogueServicePgCustomUserPwd" }}
+  eric-mxe-serving-upgrade-jobs:
+    seldondeployment-updater:
+      gitOpsRepo:
+        url: *gitOpsRepoUrl
+        branch: *deployerGitRepoBranch
+      extraEnv:
+        - name: GIT_TRACE
+          value: "true"
+        - name: GIT_CURL_VERBOSE
+          value: "true"
+        - name: GIT_COMMITTER_NAME
+          value: *commitAuthorName
+        - name: GIT_COMMITTER_EMAIL
+          value: *commitAuthorEmail
+
+mxe-training:
+  mxe-model-training-service:
+    dockerRegistry:
+      externalHostname: *apiHostname
+      externalPort: *apiPort
+    minio:
+      trainingjr:
+        instance:
+          secretkey: {{ .Values | get "ml.servicecreds.trainingjrInstanceMinioSecretkey" }}
+        service:
+          secretkey: {{ .Values | get "ml.servicecreds.trainingjrServiceMinioSecretkey" }}
+      trainingp:
+        instance:
+          secretkey: {{ .Values | get "ml.servicecreds.trainingpkgInstanceMinioSecretkey" }}
+        service:
+          secretkey: {{ .Values | get "ml.servicecreds.trainingpkgServiceMinioSecretkey" }}
+      database:
+        customUserPwd: {{ .Values | get "ml.servicecreds.trainingServicePgCustomUserPwd" }}
+
+# Warning! If changing these application tags from true to false and that application
+# is already installed, then that application will be removed and data will be lost!
+tags:
+  ml: true

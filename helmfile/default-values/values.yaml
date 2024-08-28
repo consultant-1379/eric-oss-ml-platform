@@ -1,0 +1,5 @@
+# This file should contain project level configuration only, that can't be
+# handled at the Appilication Chart Level.
+# The values entered here will not be exposed to the customer.
+
+global:

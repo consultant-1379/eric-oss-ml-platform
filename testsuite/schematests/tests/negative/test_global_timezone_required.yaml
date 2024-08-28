@@ -1,0 +1,19 @@
+global:
+  hosts:
+   iam: dummy
+   gas: dummy
+  registry:
+    url: dummy
+    username: dummy
+    password: dummy
+  timezone: null
+
+gas:
+    defaultUser:
+        username: dummy
+        password: dummy
+
+eric-ctrl-bro:
+  sftp:
+    username: dummy
+    password: dummy

@@ -1,0 +1,9 @@
+repositories:
+  - name: smoke
+    url: https://arm.seli.gic.ericsson.se/artifactory/proj-smoke-helm
+#    username: {{ env "HELM_USER" }}
+#    password: {{ env "ARM_API_TOKEN" }}
+  - name: mxe
+    url: https://arm.seli.gic.ericsson.se/artifactory/proj-mxe-release-helm
+  - name: adp-gs-all
+    url: https://arm.sero.gic.ericsson.se/artifactory/proj-adp-gs-all-helm

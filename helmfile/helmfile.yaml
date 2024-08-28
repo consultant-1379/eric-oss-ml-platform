@@ -1,0 +1,39 @@
+bases:
+  - environment.yaml
+  - repositories.yaml
+  - apiversions.gotmpl
+
+---
+
+helmDefaults:
+  wait: true
+  timeout: 2000
+
+---
+
+releases:
+  - name: eric-oss-ml-execution-env-base
+    namespace: {{ .Values | get "helmfile.app.namespace" "eric-ml-ns" }}
+    chart: {{ .Values | get "helmfile.chart.repo.name" "smoke" }}/eric-oss-ml-execution-env
+    version: {{ readFile "metadata.yaml" | fromYaml | get "version" }}
+    needs:
+    installed: {{ .Values | get "tags.ml" false }}
+    values:
+      - "./helm-values-templates/common.yaml.gotmpl"
+      - "./helm-values-templates/eric-oss-ml-execution-env-site-values.yaml.gotmpl"
+  - name: eric-oss-ml-execution-env-apps
+    namespace: {{ .Values | get "helmfile.app.namespace" "eric-ml-ns" }}
+    chart: {{ .Values | get "helmfile.chart.repo.name" "smoke" }}/eric-oss-ml-execution-env
+    version: {{ readFile "metadata.yaml" | fromYaml | get "version" }}
+    needs:
+      - eric-oss-ml-execution-env-base
+    installed: {{ .Values | get "tags.ml" false }}
+    values:
+      - "./helm-values-templates/common.yaml.gotmpl"
+      - "./helm-values-templates/eric-oss-ml-execution-env-site-values.yaml.gotmpl"
+      - mxe-deployer:
+          global:
+            mxeCommonsReleaseName: eric-oss-ml-execution-env-base
+      - mxe-serving:
+          mxe-model-catalogue-service:
+            mxeCommonsReleaseName: eric-oss-ml-execution-env-base

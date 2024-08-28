@@ -1,0 +1,17 @@
+global:
+  hosts:
+   iam: dummy
+   gas: dummy
+  registry:
+    url: dummy
+    username: dummy
+    password: dummy
+  timezone: dummy
+
+eric-sec-access-mgmt:
+    ingress:
+        hostname: dummy
+gas:
+    defaultUser:
+        username: dummy
+        password: dummy

@@ -1,0 +1,208 @@
+modelVersion: 2.0
+
+description: "OSS ML Execution Environment Pipeline"
+
+docker-images:
+  - adp-release-auto: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-adp-release-auto:latest
+  - adp-inca: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/adp-int-helm-chart-auto:latest
+  - adp-helm-dr-check: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/common-library-adp-helm-dr-check:7.9.4
+  - adp-sh: armdocker.rnd.ericsson.se/sandbox/adp-staging/adp-cicd/bob-shbuilder:latest
+  - py3-builder: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/bob-python3builder:latest
+  - deprek8ion: eu.gcr.io/swade1987/deprek8ion:1.1.33
+  - git: armdocker.rnd.ericsson.se/dockerhub-ericsson-remote/alpine/git:latest
+  - csar-builder: armdocker.rnd.ericsson.se/proj-am/releases/eric-am-package-manager:2.42.0-1
+
+properties:
+  - helm-charts-dir: charts
+  - helm-chart-name: eric-oss-ml-execution-env
+  - helmfile-name: ${helm-chart-name}-helmfile
+  - testsuite-dir: testsuite/helm-chart-validator
+  - testsuite-image-name: ${helm-chart-name}-helm-testsuite
+  - site-values-file: ${testsuite-dir}/site_values.yaml
+  - repo-helm: https://arm.seli.gic.ericsson.se/artifactory/proj-smoke-helm
+  - repo-generic: https://arm.seli.gic.ericsson.se/artifactory/proj-smoke-generic-local
+
+env:
+  - PWD
+  - HOME
+  - USER
+  - GIT_COMMIT
+  - DR_CHECK_FULL_DEPS (default=false)
+  - HELM_USER (default=${env.USER})
+  - ARM_API_TOKEN
+
+var:
+  - chart-version
+  - supported-k8s-versions
+  - helm-chart-directory
+  - design-rule-feature-level
+  - version
+
+rules:
+  git-clean:
+    - task: git-clean
+      docker-image: git
+      cmd: clean -xdff
+
+  lint:
+    - task: helm
+      docker-image: adp-release-auto
+      docker-flags:
+        - --env ENABLE_HELM_V3=true
+      cmd: helm lint ${helm-charts-dir}/${helm-chart-name}
+        --values ${site-values-file}
+
+  validate-chart-schema:
+    - task: validate
+      docker-image: adp-release-auto
+      cmd: jsonschema ${env.PWD}/${helm-charts-dir}/${helm-chart-name}/values.schema.json
+    - task: test_schema
+      docker-image: adp-release-auto
+      cmd: ${env.PWD}/testsuite/schematests/test.sh ${env.PWD}/${helm-chart-name}-0.0.0-0.tgz
+
+  shellcheck:
+    - task: run-shellcheck
+      docker-image: adp-sh
+      cmd: sh -c "git diff-tree --diff-filter=ACM --no-commit-id --name-only -r $GIT_COMMIT *.sh | xargs shellcheck"
+
+  helm-package:
+    - task: package
+      docker-image: adp-inca
+      docker-flags:
+      - --env HELM_REPO_CREDENTIALS
+      cmd: ihc-package --version 0.0.0-0 --output ${env.PWD} --helm-credentials ${env.HELM_REPO_CREDENTIALS} --folder ${env.PWD}/${helm-charts-dir}/${helm-chart-name}
+
+  validate-helm3-charts:
+    - task: validate
+      docker-image: adp-inca
+      cmd: bash -c 'export PATH=/usr/share/helm/3.x/:$PATH;
+        TEMPLATE_FAILED=blank;
+        for VALUES in $(find ${env.PWD}/${testsuite-dir} | grep yaml | grep -v "[0-9].[0-9].[0-9]-[0-9]" | grep -v "*eo-bur*");
+          do echo "Scanning $VALUES";
+          helm template ${env.PWD}/${helm-chart-name}-*.tgz -f $VALUES 1> /dev/null;
+          if [ $? -ne 0 ]; then
+            TEMPLATE_FAILED=true;
+            echo -e "\e[1m\e[31mTEMPLATE_FAILED\e[0m";
+          else
+            echo -e "\e[1m\e[32mTEMPLATE_PASSED\e[0m";
+          fi
+        done;
+        if [ "$TEMPLATE_FAILED" = "true" ]; then
+          echo -e "\e[1m\e[31mOne or More Templates have failed, Please Investigate\e[0m";
+          exit 1;
+        fi'
+
+  build-testsuite-image:
+    - task: docker-build
+      cmd: docker build ${env.PWD}/${testsuite-dir}
+        --tag ${testsuite-image-name}:latest
+
+  run-chart-testsuite:
+    - task: get-chart-version
+      cmd: find . -maxdepth 1 -name '${helm-chart-name}-[0-9]*.tgz' | grep -oP '${helm-chart-name}-\K.*(?=\.tgz)' > .bob/var.chart-version
+    - task: run-testsuite
+      cmd: docker run --name ${testsuite-image-name}
+        -v ${env.PWD}/${helm-chart-name}-${var.chart-version}.tgz:/${helm-chart-name}.tgz
+        ${testsuite-image-name}:latest
+
+  test-suite-report-and-clean:
+    - task: get-test-report
+      cmd: docker cp ${testsuite-image-name}:/testsuite/report.html ${env.PWD}/chart-test-report.html
+    - task: clean-container
+      cmd: docker rm -f ${testsuite-image-name}
+
+  kube-version:
+    - task: output-kube-versions-to-file
+      docker-image: adp-release-auto
+      cmd: bash ${env.PWD}/ci/scripts/print_supported_k8s_versions.sh ${env.PWD} > .bob/var.supported-k8s-versions
+
+  kubeval:
+    - task: output-helm-template-to-file
+      docker-image: adp-release-auto
+      docker-flags:
+        - --env ENABLE_HELM_V3=true
+      cmd: helm template ${env.PWD}/${helm-chart-name}-*.tgz -f ${site-values-file} > .bob/full-helm-template.yaml
+    - task: run-kubeval
+      docker-image: adp-helm-dr-check
+      cmd: ${env.PWD}/ci/scripts/kubeval.sh ${env.PWD}/.bob/var.supported-k8s-versions ${env.PWD}/.bob/full-helm-template.yaml
+
+  deprek8ion:
+    - task: run-deprek8ion
+      docker-image: deprek8ion
+      docker-flags:
+        - "--entrypoint ${env.PWD}/ci/scripts/deprek8ion.sh"
+      cmd:  ${env.PWD}/.bob/var.supported-k8s-versions ${env.PWD}/.bob/full-helm-template.yaml
+
+  set-design-rule-parameters:
+    - task: generate-design-rule-parameters
+      cmd: bash -c '
+          if [[ ${env.DR_CHECK_FULL_DEPS} != "falses" ]]; then
+            echo ".bob/${helm-chart-name}_tmp/${helm-chart-name}" > .bob/var.helm-chart-directory;
+            echo "0" > .bob/var.design-rule-feature-level;
+          else
+            echo "${helm-charts-dir}/${helm-chart-name}" > .bob/var.helm-chart-directory;
+            echo "1" > .bob/var.design-rule-feature-level;
+          fi'
+
+  design-rule-checker:
+    - task: helm-dr-checker
+      docker-image: adp-helm-dr-check
+      cmd: helm-dr-check
+        -DhelmDesignRule.feature.${helm-chart-name}.dependency=${var.design-rule-feature-level}
+        -Dhelmdrck.credential.file.path=${env.HELM_REPO_CREDENTIALS}
+        --helm-chart ${var.helm-chart-directory}
+        --log-level WARN
+
+
+  # eric-oss-ml-execution-env specific rules for manual release
+  release-all:
+    - rule: init
+    - rule: chart
+    - rule: helmfile
+    - rule: csar
+
+  init:
+    - task: version
+      cmd: sed -n -e 's/\r//g' -e 's/^version:\s*//p' ${helm-charts-dir}/${helm-chart-name}/Chart.yaml > ${env.PWD}/.bob/var.version
+    - task: compare-versions
+      cmd: test "${var.version}" = "$(sed -n -e 's/\r//g' -e 's/^version:\s*//p' helmfile/metadata.yaml)"
+
+  chart:
+    - task: package
+      docker-image: adp-inca
+      cmd: ihc-package --folder ${helm-charts-dir}/${helm-chart-name} --version ${var.version} --workdir ${env.PWD}/.bob --output ${env.PWD}/.bob --helm-user ${env.HELM_USER} --arm-api-token ${env.ARM_API_TOKEN}
+    - task: upload
+      docker-image: adp-inca
+      cmd: arm-upload --file ${env.PWD}/.bob/${helm-chart-name}-${var.version}.tgz --destination ${repo-helm}/${helm-chart-name}/ --token ${env.ARM_API_TOKEN}
+
+  helmfile:
+    - task: package
+      docker-image: adp-inca
+      cmd:
+        - helmfile -f helmfile/helmfile.yaml deps
+        - tar -C ${env.PWD} --format=posix -zcvf .bob/${helmfile-name}-${var.version}.tgz --transform='s,^helmfile,${helmfile-name},'
+          --no-recursion $(git ls-tree -rt --name-only HEAD helmfile/) helmfile/helmfile.lock
+    - task: upload
+      docker-image: adp-inca
+      cmd: arm-upload --file ${env.PWD}/.bob/${helm-chart-name}-helmfile-${var.version}.tgz --destination ${repo-helm}/${helm-chart-name}-helmfile/ --token ${env.ARM_API_TOKEN}
+
+  csar:
+    - task: helm-fetch-chart
+      docker-image: adp-inca
+      cmd: bash -c '
+        helm repo add smoke ${repo-helm} --username ${env.HELM_USER} --password "${env.ARM_API_TOKEN}";
+        helm fetch --version ${var.version} smoke/${helm-chart-name} --destination ${env.PWD}/.bob/'
+    - task: package
+      docker-image: csar-builder
+      docker-flags:
+        - "--volume ${env.PWD}/.bob:/csar"
+        - "--volume ${env.PWD}:${env.PWD}"
+        - "--volume ${env.HOME}/.docker:/root/.docker"
+        - "--volume /var/run/docker.sock:/var/run/docker.sock"
+        - "--workdir /csar"
+        - "--env ARM_API_TOKEN=${env.ARM_API_TOKEN}"
+      cmd: generate --helm3 --name ${helm-chart-name}-${var.version} --no-images
+        --helm ${env.PWD}/.bob/${helm-chart-name}-${var.version}.tgz
+    - task: upload
+      docker-image: adp-inca
+      cmd: arm-upload --file ${env.PWD}/.bob/${helm-chart-name}-${var.version}.csar --destination ${repo-generic}/csars/${helm-chart-name}/${var.version}/ --token ${env.ARM_API_TOKEN}
